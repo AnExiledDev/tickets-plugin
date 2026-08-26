@@ -1,0 +1,8 @@
+{
+  "name": "tickets",
+  "description": "Well-shaped, self-contained GitHub issues: a file-issue skill defining the workflow and label conventions, plus a PreToolUse hook that blocks issue creation missing the required anatomy",
+  "version": "1.0.0",
+  "author": {
+    "name": "deploy"
+  }
+}
