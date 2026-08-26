@@ -63,4 +63,4 @@ gh issue create -R <owner/repo> --title "<imperative, specific title>" --body-fi
 
 - Confirm with `gh issue view <n>` that it rendered correctly (mark first, sections intact).
 - Link it where it came from: the PR/issue/plan that spawned it gets a one-line pointer.
-- Do NOT claim it — claiming happens when someone starts the work (`issue-claim-protocol.md`).
+- Do NOT claim it — claiming happens when someone starts the work (`/tickets:work-issue`).
