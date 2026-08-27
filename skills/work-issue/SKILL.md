@@ -35,6 +35,12 @@ Two sessions silently working the same issue is the most expensive collision ava
 
 Comment lifecycle events only — claim, release, takeover, PR opened, decision taken, human intent captured. No progress chatter.
 
+Reading the issue put it in the session's claim ledger, and the first edit, `Task` spawn or commit is blocked until it says claimed or skipped. Posting the claim comment above clears it — there is nothing extra to run. If you looked and are not going to work it, say so once:
+
+```bash
+~/.claude/skills/tickets/scripts/ticket-ledger.sh skip <n>
+```
+
 ## 3. Isolate
 
 Work on a branch named for the issue (e.g. `issue-123-short-slug`), in a worktree when the session pattern calls for one. Never on the default branch.
