@@ -135,6 +135,66 @@ sed 's/^\$(body_file_text "\$CMD")/x/' "$S/check-claim-adherence.sh" > "$TICKETS
 chmod +x "$TICKETS_STATE_DIR/old-nobody.sh"
 run "$TICKETS_STATE_DIR/old-nobody.sh" >/dev/null; ck "without --body-file reading it sees nothing (the other bug)" 0 $?
 
+echo "== 15. the prompt seeds the ledger, so the gate fires without a gh issue view =="
+PSID="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+prompt() { jq -n --arg s "${2:-$PSID}" --arg p "$1" --arg a "${3:-}" \
+  '{session_id:$s,prompt:$p} + (if $a=="" then {} else {agent_id:$a} end)'; }
+pledger() { jq -r "${1}" "$TICKETS_STATE_DIR/$PSID.json" 2>/dev/null; }
+
+out="$(prompt 'work issue #338 please' | "$S/inject-work-issue.sh")"
+printf '%s' "$out" | grep -q 'work-issue' && { pass=$((pass+1)); echo "  ok   still injects the pointer"; } || { fail=$((fail+1)); echo "  FAIL pointer not injected"; }
+jq -e '.issues["338"].state == "undecided"' "$TICKETS_STATE_DIR/$PSID.json" >/dev/null && { pass=$((pass+1)); echo "  ok   prompt seeded 338 undecided"; } || { fail=$((fail+1)); echo "  FAIL prompt did not seed the ledger"; }
+
+# The whole point: no `gh issue view` ever ran for this session.
+jq -n --arg s "$PSID" '{session_id:$s,tool_name:"Edit",tool_input:{file_path:"/tmp/x"}}' | "$S/require-claim.sh" 2>/dev/null
+ck "first Edit blocked off a prompt-seeded issue" 2 $?
+
+echo "== 16. seeding is scoped to working prompts and real numbers =="
+QSID="aaaaaaaa-bbbb-cccc-dddd-ffffffffffff"
+prompt 'file an issue about #12' "$QSID" | "$S/inject-work-issue.sh" >/dev/null
+[ -f "$TICKETS_STATE_DIR/$QSID.json" ] && { fail=$((fail+1)); echo "  FAIL a filing prompt seeded the ledger"; } || { pass=$((pass+1)); echo "  ok   filing prompt seeds nothing"; }
+prompt 'what does the monitor do on a quiet tick?' "$QSID" | "$S/inject-work-issue.sh" >/dev/null
+[ -f "$TICKETS_STATE_DIR/$QSID.json" ] && { fail=$((fail+1)); echo "  FAIL an unrelated prompt seeded the ledger"; } || { pass=$((pass+1)); echo "  ok   unrelated prompt seeds nothing"; }
+
+RSID="aaaaaaaa-bbbb-cccc-dddd-111111111111"
+prompt 'pick up https://github.com/o/r/issues/442#issuecomment-99 today' "$RSID" | "$S/inject-work-issue.sh" >/dev/null
+jq -e '.issues | keys == ["442"]' "$TICKETS_STATE_DIR/$RSID.json" >/dev/null && { pass=$((pass+1)); echo "  ok   issue URL seeds 442, not the comment id"; } || { fail=$((fail+1)); echo "  FAIL URL seeding took the wrong number: $(jq -c '.issues|keys' "$TICKETS_STATE_DIR/$RSID.json" 2>/dev/null)"; }
+
+echo "== 17. seeding never reopens a decision, and fails open =="
+"$S/ticket-ledger.sh" skip 338 >/dev/null 2>&1 <<< '' || true
+TICKETS_STATE_DIR="$TICKETS_STATE_DIR" jq --arg n 338 '.issues[$n].state="claimed"' "$TICKETS_STATE_DIR/$PSID.json" > "$TICKETS_STATE_DIR/$PSID.tmp" && mv "$TICKETS_STATE_DIR/$PSID.tmp" "$TICKETS_STATE_DIR/$PSID.json"
+prompt 'resume issue #338' | "$S/inject-work-issue.sh" >/dev/null
+jq -e '.issues["338"].state == "claimed"' "$TICKETS_STATE_DIR/$PSID.json" >/dev/null && { pass=$((pass+1)); echo "  ok   a claimed issue stays claimed"; } || { fail=$((fail+1)); echo "  FAIL re-seeding reopened a claimed issue"; }
+
+ZSID="aaaaaaaa-bbbb-cccc-dddd-222222222222"
+prompt 'work issue #7' "$ZSID" 'agent-abc' | "$S/inject-work-issue.sh" >/dev/null
+[ -f "$TICKETS_STATE_DIR/$ZSID.json" ] && { fail=$((fail+1)); echo "  FAIL a subagent seeded the ledger"; } || { pass=$((pass+1)); echo "  ok   subagent seeds nothing"; }
+out="$(prompt 'work issue #7' '' | "$S/inject-work-issue.sh")"; rc=$?
+ck "no session_id: injects, seeds nothing, exits 0" 0 $rc
+printf '%s' "$out" | grep -q 'work-issue' && { pass=$((pass+1)); echo "  ok   pointer survives a missing session id"; } || { fail=$((fail+1)); echo "  FAIL lost the pointer when seeding could not run"; }
+TICKETS_STATE_DIR=/proc/nonexistent/nope prompt 'work issue #9' | TICKETS_STATE_DIR=/proc/nonexistent/nope "$S/inject-work-issue.sh" >/dev/null
+ck "unwritable state dir does not fail the hook" 0 $?
+
+echo "== 18. the view reader takes the command's argument, not any digits after it =="
+VSID="aaaaaaaa-bbbb-cccc-dddd-333333333333"
+vcmd() { jq -n --arg s "$VSID" --arg c "$1" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:""}}'; }
+# The real shape that bit twice on 2026-09-07: prose naming the command, with
+# digits somewhere further right for the old `first number anywhere` read to
+# grab. Here it seeded a bogus #45 and blocked the next edit.
+VPROSE='echo "the ledger was written only by gh issue view N (see record-issue-view.sh line 45)"'
+vcmd "$VPROSE" | "$S/record-issue-view.sh" >/dev/null
+[ -f "$TICKETS_STATE_DIR/$VSID.json" ] && { fail=$((fail+1)); echo "  FAIL prose mentioning the command seeded $(jq -c '.issues|keys' "$TICKETS_STATE_DIR/$VSID.json")"; } || { pass=$((pass+1)); echo "  ok   prose mentioning the command seeds nothing"; }
+vcmd 'gh issue view https://github.com/o/r/issues/442#issuecomment-99' | "$S/record-issue-view.sh" >/dev/null
+jq -e '.issues | keys == ["442"]' "$TICKETS_STATE_DIR/$VSID.json" >/dev/null && { pass=$((pass+1)); echo "  ok   URL form still reads 442"; } || { fail=$((fail+1)); echo "  FAIL URL form read $(jq -c '.issues|keys' "$TICKETS_STATE_DIR/$VSID.json" 2>/dev/null)"; }
+vcmd 'gh issue view 55 --comments' | "$S/record-issue-view.sh" >/dev/null
+jq -e '.issues["55"].state == "undecided"' "$TICKETS_STATE_DIR/$VSID.json" >/dev/null && { pass=$((pass+1)); echo "  ok   bare number with flags still reads 55"; } || { fail=$((fail+1)); echo "  FAIL lost the bare-number form"; }
+
+# Watch the old reader fail on the same input. Its whole extraction was
+# "everything after the phrase, then the first digits anywhere in it", which is
+# why prose could feed it a number.
+OLD_READ="$(printf '%s' "$VPROSE" | sed -E 's#.*gh +issue +view +##' | grep -oE '[0-9]+' | head -1)"
+[ "$OLD_READ" = "45" ] && { pass=$((pass+1)); echo "  ok   the old read takes a bogus 45 from the same text (the bug)"; } || { fail=$((fail+1)); echo "  FAIL could not reproduce the old misread (got '$OLD_READ')"; }
+
 echo
 echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]
