@@ -39,7 +39,7 @@ case "$TOOL" in
   Edit|Write|NotebookEdit|Task|Agent) ;;
   Bash)
     CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)"
-    printf '%s' "$CMD" | grep -qE 'git +commit' || exit 0
+    printf '%s' "$CMD" | grep -qE "${GIT_SUBCMD_RE}commit" || exit 0
     ;;
   *) exit 0 ;;
 esac
@@ -48,6 +48,29 @@ SESSION="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SESSION" ] || exit 0
 
 NOW="$(date +%s)"
+
+# A branch or worktree named `issue-<N>` is a claim-worthy signal the ledger
+# never heard: a session handed a ready worktree does its reading in the
+# editor, never runs `gh issue view`, and so passes the gate with an empty
+# ledger. Unlike prompt text this cannot mass-seed, because a checkout names
+# exactly one issue, and check-claim-adherence.sh already trusts it at PR time.
+seed_from_branch() {
+  local cwd branch ref n state
+  cwd="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
+  [ -n "$cwd" ] || return 0
+
+  branch="$(timeout 5 git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  ref="$(issue_from_ref "$branch")"
+  [ -n "$ref" ] || ref="$(issue_from_ref "$cwd")"
+  [ -n "$ref" ] || return 0
+
+  state="$(ledger_read "$SESSION")"
+  ledger_write "$SESSION" "$(ledger_note_seen "$state" "$ref" "$NOW")"
+}
+
+seed_from_branch
+
+
 STATE="$(ledger_read "$SESSION")"
 
 UNDECIDED="$(printf '%s' "$STATE" | jq -r '

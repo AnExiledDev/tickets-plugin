@@ -195,6 +195,43 @@ jq -e '.issues["55"].state == "undecided"' "$TICKETS_STATE_DIR/$VSID.json" >/dev
 OLD_READ="$(printf '%s' "$VPROSE" | sed -E 's#.*gh +issue +view +##' | grep -oE '[0-9]+' | head -1)"
 [ "$OLD_READ" = "45" ] && { pass=$((pass+1)); echo "  ok   the old read takes a bogus 45 from the same text (the bug)"; } || { fail=$((fail+1)); echo "  FAIL could not reproduce the old misread (got '$OLD_READ')"; }
 
+echo "== 19. the issue number is read from ANY argument position =="
+S19="19191919-1111-2222-3333-444444444444"
+p19() { jq -n --arg s "$S19" --arg c "$1" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:""}}'; }
+p19 'gh issue view --repo o/r 14' | "$S/record-issue-view.sh" >/dev/null
+jq -e '.issues["14"].state == "undecided"' "$TICKETS_STATE_DIR/$S19.json" >/dev/null && { pass=$((pass+1)); echo "  ok   a flag before the number still records the issue"; } || { fail=$((fail+1)); echo "  FAIL --repo before the number recorded nothing"; }
+OLD_VIEW="$(printf '%s' 'gh issue view --repo o/r 14' | grep -oE 'gh +issue +view +[^[:space:]]+' | head -1 | sed -E 's#.*view +##')"
+[ "$OLD_VIEW" = "--repo" ] && { pass=$((pass+1)); echo "  ok   the old read took '--repo' as the issue (the bug)"; } || { fail=$((fail+1)); echo "  FAIL could not reproduce the old misread (got '$OLD_VIEW')"; }
+
+p19 "gh issue comment --repo o/r2 12 --body 'claiming, session $S19'" | "$S/record-claim.sh" >/dev/null
+jq -e '.issues["12"].state == "claimed"' "$TICKETS_STATE_DIR/$S19.json" >/dev/null && { pass=$((pass+1)); echo "  ok   a claim comment behind a --repo flag marks the right issue"; } || { fail=$((fail+1)); echo "  FAIL claim did not land on 12"; }
+jq -e '.issues["2"] == null' "$TICKETS_STATE_DIR/$S19.json" >/dev/null && { pass=$((pass+1)); echo "  ok   the '2' inside the repo name is not treated as an issue"; } || { fail=$((fail+1)); echo "  FAIL claimed issue 2 out of the repo name (the bug)"; }
+
+echo "== 20. git commit is caught with flags before the subcommand =="
+S20="20202020-1111-2222-3333-444444444444"
+jq -n --arg s "$S20" '{issues:{"338":{state:"undecided",seen:1,nagged:0}},injected:[]}' > "$TICKETS_STATE_DIR/$S20.json"
+p20() { jq -n --arg s "$S20" --arg c "$1" '{session_id:$s,cwd:"/tmp",tool_name:"Bash",tool_input:{command:$c}}'; }
+p20 'git -C /home/deploy/wt commit -m x' | "$S/require-claim.sh" >/dev/null 2>&1; ck "\`git -C <dir> commit\` is gated" 2 $?
+printf '%s' 'git -C /home/deploy/wt commit -m x' | grep -qE 'git +commit'; [ $? = 1 ] && { pass=$((pass+1)); echo "  ok   the old literal match missed it (the bug)"; } || { fail=$((fail+1)); echo "  FAIL old match already caught it"; }
+S20B="20b02020-1111-2222-3333-444444444444"
+jq -n '{issues:{"338":{state:"undecided",seen:1,nagged:0}},injected:[]}' > "$TICKETS_STATE_DIR/$S20B.json"
+jq -n --arg s "$S20B" '{session_id:$s,cwd:"/tmp",tool_name:"Bash",tool_input:{command:"git commit -m x"}}' | "$S/require-claim.sh" >/dev/null 2>&1; ck "plain \`git commit\` still gated" 2 $?
+p20 'git log --oneline | grep commit' | "$S/require-claim.sh" >/dev/null 2>&1; ck "a command merely mentioning commit is not gated" 0 $?
+
+echo "== 21. a branch or worktree named issue-<N> seeds the ledger =="
+S21="21212121-1111-2222-3333-444444444444"
+REPO="$SCRATCH/wt-issue-321"
+git init -q "$REPO" && git -C "$REPO" checkout -q -b issue-321-thing
+git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m seed
+jq -n --arg s "$S21" --arg d "$REPO" '{session_id:$s,cwd:$d,tool_name:"Edit",tool_input:{file_path:"/tmp/x"}}' | "$S/require-claim.sh" >/dev/null 2>&1; ck "an edit on an issue-321 branch is gated" 2 $?
+jq -e '.issues["321"].state == "undecided"' "$TICKETS_STATE_DIR/$S21.json" >/dev/null && { pass=$((pass+1)); echo "  ok   the branch name seeded 321"; } || { fail=$((fail+1)); echo "  FAIL branch name seeded nothing"; }
+
+S22="22222222-1111-2222-3333-444444444444"
+jq -n --arg s "$S22" '{session_id:$s,tool_name:"Bash",tool_input:{command:"git worktree add .claude/worktrees/issue-654-x -b issue-654-x"},tool_response:{stdout:""}}' | "$S/record-branch-work.sh" >/dev/null
+jq -e '.issues["654"].state == "undecided"' "$TICKETS_STATE_DIR/$S22.json" >/dev/null && { pass=$((pass+1)); echo "  ok   creating an issue-654 worktree seeds 654"; } || { fail=$((fail+1)); echo "  FAIL worktree creation seeded nothing"; }
+jq -n --arg s "$S22" '{session_id:$s,tool_name:"Bash",tool_input:{command:"git status"},tool_response:{stdout:""}}' | "$S/record-branch-work.sh" >/dev/null
+jq -e '[.issues | keys[]] | length == 1' "$TICKETS_STATE_DIR/$S22.json" >/dev/null && { pass=$((pass+1)); echo "  ok   an unrelated git command seeds nothing"; } || { fail=$((fail+1)); echo "  FAIL unrelated git command seeded an issue"; }
+
 echo
 echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]

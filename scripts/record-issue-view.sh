@@ -41,18 +41,14 @@ printf '%s' "$CMD" | grep -qE 'gh +issue +view' || exit 0
 SESSION="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SESSION" ] || exit 0
 
-# The number, whether written bare or as an issue URL. It must be the argument
-# to the command, not merely somewhere after it: the old `first digits anywhere
-# to the right` read fired on any command whose text mentioned the phrase, so
+# The number, whether written bare or as an issue URL, from any argument
+# position: `gh issue view --repo o/r 14` puts a flag where the old read
+# expected the number, so a claim-worthy view recorded nothing. Scanning for
+# the first digits anywhere to the right is what this replaced, and it is
+# worse: it fired on any command whose text merely mentioned the phrase, so
 # writing about this hook seeded a bogus issue and blocked the next edit until
 # it was skipped. Seen twice while editing this plugin, 2026-09-07.
-TARGET="$(printf '%s' "$CMD" | grep -oE 'gh +issue +view +[^[:space:]]+' | head -1 |
-          sed -E 's#.*view +##')"
-
-case "$TARGET" in
-  *issues/*) ISSUE="$(printf '%s' "$TARGET" | grep -oE 'issues/[0-9]+' | head -1 | grep -oE '[0-9]+')" ;;
-  *)         ISSUE="$(printf '%s' "$TARGET" | grep -oE '^#?[0-9]+$' | grep -oE '[0-9]+')" ;;
-esac
+ISSUE="$(gh_issue_number "$CMD" view)"
 
 [ -n "$ISSUE" ] || exit 0
 

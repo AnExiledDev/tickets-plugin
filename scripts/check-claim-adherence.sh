@@ -32,10 +32,9 @@ INPUT="$(cat)" || exit 0
 CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)" || exit 0
 [ -n "$CMD" ] || exit 0
 
-case "$CMD" in
-  *"gh pr create"*|*"git commit"*|*"git push"*) ;;
-  *) exit 0 ;;
-esac
+# `git -C <dir> commit` is house style for worktree jobs here, and a literal
+# `git commit` match walked straight past it.
+printf '%s' "$CMD" | grep -qE "gh +pr +create|${GIT_SUBCMD_RE}(commit|push)" || exit 0
 
 SESSION_ID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
