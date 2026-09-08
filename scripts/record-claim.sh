@@ -29,8 +29,9 @@ printf '%s' "$CMD" | grep -qE 'gh +issue +comment' || exit 0
 SESSION="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SESSION" ] || exit 0
 
-ISSUE="$(printf '%s' "$CMD" | sed -E 's#.*gh +issue +comment +##' |
-         grep -oE '[0-9]+' | head -1)"
+# Any argument position: `gh issue comment --repo o/r2 12` fed the old read
+# the `2` out of the repo name and marked the wrong issue claimed.
+ISSUE="$(gh_issue_number "$CMD" comment)"
 [ -n "$ISSUE" ] || exit 0
 
 BODY="$CMD

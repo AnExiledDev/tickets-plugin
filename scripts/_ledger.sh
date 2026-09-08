@@ -43,6 +43,45 @@ hook_is_subagent() {
   [ -n "$id" ]
 }
 
+# The issue number a `gh issue <verb>` command acts on, from ANY argument
+# position. Flags can sit before the number (`gh issue view --repo o/r 14`), so
+# the first token after the verb is not it; reading the first digits anywhere to
+# the right is worse, because prose about the command feeds it numbers. Walk the
+# tokens after the verb, stop at a shell separator, take the first bare number or
+# `issues/<N>` URL. A number the shell would expand (`gh issue view "$N"`) is not
+# recoverable from the command text and yields nothing, which fails open.
+gh_issue_number() {
+  printf '%s' "$1" |
+    sed -E 's/(&&|\|\||[;|&])/ \n /g' |
+    tr ' \t' '\n\n' |
+    awk -v verb="$2" '
+      { gsub(/^["'"'"']+|["'"'"']+$/, "") }
+      seen && $0 == "\n" { exit }
+      seen && /^#?[0-9]+$/ { gsub(/#/, ""); print; exit }
+      seen && /issues\/[0-9]+/ {
+        match($0, /issues\/[0-9]+/)
+        print substr($0, RSTART + 7, RLENGTH - 7)
+        exit
+      }
+      p2 == "gh" && p1 == "issue" && $0 == verb { seen = 1 }
+      { p2 = p1; p1 = $0 }
+    ' 2>/dev/null | head -1
+}
+
+# `git -C <dir> commit` is house style for worktree jobs on this box and matched
+# neither gate: both greps required `git` and the subcommand to be adjacent. Any
+# run of flags (with or without values) may sit between them.
+GIT_SUBCMD_RE='git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?)*[[:space:]]+'
+
+# The issue a branch or worktree directory names, e.g. `issue-338-short-slug` or
+# `.claude/worktrees/issue-338-x`. This is the one discovery signal that is not
+# text inference: check-claim-adherence.sh already trusts it at PR time, and a
+# branch names exactly one issue, so a triage sweep can never mass-seed through
+# it.
+issue_from_ref() {
+  printf '%s' "$1" | grep -oE '(^|/)issue-?[0-9]+' | tail -1 | grep -oE '[0-9]+'
+}
+
 ledger_path() { printf '%s/%s.json' "$TICKETS_STATE_DIR" "$1"; }
 
 ledger_read() {
