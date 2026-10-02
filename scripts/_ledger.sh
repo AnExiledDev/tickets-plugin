@@ -50,13 +50,17 @@ hook_is_subagent() {
 # tokens after the verb, stop at a shell separator, take the first bare number or
 # `issues/<N>` URL. A number the shell would expand (`gh issue view "$N"`) is not
 # recoverable from the command text and yields nothing, which fails open.
+#
+# The separator is a sentinel word, not a newline: once tr has split on
+# whitespace a newline token can never compare equal, so the old stop never
+# fired and `gh issue view "$n" | head -1` recorded a phantom issue 1.
 gh_issue_number() {
   printf '%s' "$1" |
-    sed -E 's/(&&|\|\||[;|&])/ \n /g' |
+    sed -E 's/(&&|\|\||[;|&])/ __SEP__ /g' |
     tr ' \t' '\n\n' |
     awk -v verb="$2" '
       { gsub(/^["'"'"']+|["'"'"']+$/, "") }
-      seen && $0 == "\n" { exit }
+      seen && $0 == "__SEP__" { exit }
       seen && /^#?[0-9]+$/ { gsub(/#/, ""); print; exit }
       seen && /issues\/[0-9]+/ {
         match($0, /issues\/[0-9]+/)
@@ -83,6 +87,57 @@ issue_from_ref() {
 }
 
 ledger_path() { printf '%s/%s.json' "$TICKETS_STATE_DIR" "$1"; }
+
+# Claude Code runs every hook on a matcher in parallel, so record-issue-view
+# and record-claim both read the ledger, both write it, and the slower one wins:
+# a claim posted in the same Bash call as a view (or beside a branch command)
+# was overwritten with "undecided". Each hook takes this lock before its first
+# read and holds it until it exits. No flock, no lock: fail open.
+ledger_lock() {
+  command -v flock >/dev/null 2>&1 || return 0
+  mkdir -p "$TICKETS_STATE_DIR" 2>/dev/null || return 0
+  exec 9>"$(ledger_path "$1").lock" 2>/dev/null || return 0
+  flock -w 5 9 2>/dev/null || true
+}
+
+# The owner/repo a `gh issue` command names with -R/--repo or an issue URL,
+# lowercased; empty when it names none (it then acts on the cwd's repo).
+issue_cmd_repo() {
+  local repo
+  repo="$(printf '%s' "$1" | grep -oE -- '(-R|--repo)[=[:space:]]+[^[:space:]]+' | head -1 |
+          sed -E 's/^(-R|--repo)[=[:space:]]+//' | tr -d "\"'")"
+  [ -n "$repo" ] || repo="$(printf '%s' "$1" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/issues/' | head -1 |
+                            sed -E 's#^github\.com/##; s#/issues/$##')"
+  printf '%s' "${repo##*github.com/}" | tr 'A-Z' 'a-z'
+}
+
+# True when the command reads an issue in some other repo than the one the
+# session is working in: research on an upstream tracker is never a work item.
+# Unknown either way (no -R, no cwd, no origin) is not foreign.
+issue_is_foreign() {
+  local repo origin
+  repo="$(issue_cmd_repo "$1")"
+  [ -n "$repo" ] && [ -n "$2" ] || return 1
+
+  origin="$(timeout 5 git -C "$2" remote get-url origin 2>/dev/null | tr 'A-Z' 'a-z')"
+  [ -n "$origin" ] || return 1
+
+  origin="${origin%.git}"
+  case "$origin" in
+    *[/:]"$repo") return 1 ;;
+  esac
+  return 0
+}
+
+# True when this session's id is on a claim comment on GitHub. The ledger only
+# hears claims made through the hooks; a claim posted in a loop, through a
+# variable, before a compaction, or by any route the command text hides is
+# still on the issue, so the gate asks the issue before it blocks.
+claimed_on_github() {
+  local body
+  body="$(cd "${3:-.}" 2>/dev/null && timeout 10 gh issue view "$1" --json comments -q '.comments[].body // ""' 2>/dev/null)" || return 1
+  claim_session_ids "$body" | grep -qxF "$2"
+}
 
 ledger_read() {
   local file

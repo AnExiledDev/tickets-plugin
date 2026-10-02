@@ -52,7 +52,12 @@ ISSUE="$(gh_issue_number "$CMD" view)"
 
 [ -n "$ISSUE" ] || exit 0
 
+# `gh issue view 8419 -R emilk/egui` is research on someone else's tracker.
+CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
+issue_is_foreign "$CMD" "$CWD" && exit 0
+
 NOW="$(date +%s)"
+ledger_lock "$SESSION"
 STATE="$(ledger_read "$SESSION")"
 WAS="$(ledger_state_of "$STATE" "$ISSUE")"
 
@@ -69,6 +74,14 @@ if ! printf '%s' "$BODY" | grep -qi 'claim'; then
 fi
 
 OTHERS="$(claim_session_ids "$BODY" | grep -vF "$SESSION" || true)"
+
+# A claim left on a CLOSED issue is history, not a collision. The view's own
+# output usually says the state; ask only when it does not and it matters.
+if [ -n "$OTHERS" ]; then
+  ISSUE_STATE="$(printf '%s' "$BODY" | grep -oiE '(^state:[[:space:]]*|"state":[[:space:]]*")(open|closed)' | head -1 | grep -oiE 'open|closed')"
+  [ -n "$ISSUE_STATE" ] || ISSUE_STATE="$(cd "${CWD:-.}" 2>/dev/null && timeout 10 gh issue view "$ISSUE" --json state -q .state 2>/dev/null)"
+  printf '%s' "$ISSUE_STATE" | grep -qi '^closed' && OTHERS=""
+fi
 
 NOTE=""
 
