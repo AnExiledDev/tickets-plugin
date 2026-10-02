@@ -19,9 +19,12 @@ STUB="$SCRATCH/stub"
 mkdir -p "$STUB"
 cat > "$STUB/gh" <<EOF
 #!/bin/sh
-# issue 777 is claimed by another session; everything else is unclaimed.
+# 777 is claimed by another session, 778 likewise but CLOSED, 802 by this
+# session; everything else is unclaimed.
 case "\$*" in
   *777*) echo '**Claimed** - session \`$OTHER\`' ;;
+  *778*state*) echo 'CLOSED' ;;
+  *778*) echo '**Claimed** - session \`$OTHER\`' ;;
   *802*) echo '**Claimed** - session \`$SID\`' ;;
   *) echo '' ;;
 esac
@@ -231,6 +234,49 @@ jq -n --arg s "$S22" '{session_id:$s,tool_name:"Bash",tool_input:{command:"git w
 jq -e '.issues["654"].state == "undecided"' "$TICKETS_STATE_DIR/$S22.json" >/dev/null && { pass=$((pass+1)); echo "  ok   creating an issue-654 worktree seeds 654"; } || { fail=$((fail+1)); echo "  FAIL worktree creation seeded nothing"; }
 jq -n --arg s "$S22" '{session_id:$s,tool_name:"Bash",tool_input:{command:"git status"},tool_response:{stdout:""}}' | "$S/record-branch-work.sh" >/dev/null
 jq -e '[.issues | keys[]] | length == 1' "$TICKETS_STATE_DIR/$S22.json" >/dev/null && { pass=$((pass+1)); echo "  ok   an unrelated git command seeds nothing"; } || { fail=$((fail+1)); echo "  FAIL unrelated git command seeded an issue"; }
+
+echo "== 23. a pipe or chain after the issue argument ends the read =="
+S23="23232323-1111-2222-3333-444444444444"
+p23() { jq -n --arg s "$S23" --arg c "$1" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:""}}'; }
+p23 'gh issue view "$n" --json body | head -1' | "$S/record-issue-view.sh" >/dev/null
+[ -f "$TICKETS_STATE_DIR/$S23.json" ] && { fail=$((fail+1)); echo "  FAIL a variable issue piped to head seeded $(jq -c '.issues|keys' "$TICKETS_STATE_DIR/$S23.json")"; } || { pass=$((pass+1)); echo "  ok   head -1 after a variable issue seeds no phantom #1"; }
+p23 'gh issue view "$n" && sleep 5' | "$S/record-issue-view.sh" >/dev/null
+[ -f "$TICKETS_STATE_DIR/$S23.json" ] && { fail=$((fail+1)); echo "  FAIL a chained sleep seeded $(jq -c '.issues|keys' "$TICKETS_STATE_DIR/$S23.json")"; } || { pass=$((pass+1)); echo "  ok   a chained command's number is not the issue"; }
+
+echo "== 24. reading another repo's issue is research, not work =="
+S24="24242424-1111-2222-3333-444444444444"
+MINE="$SCRATCH/mine"; git init -q "$MINE"; git -C "$MINE" remote add origin https://github.com/Me/Mine.git
+p24() { jq -n --arg s "$S24" --arg c "$1" --arg d "$MINE" '{session_id:$s,cwd:$d,tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:""}}'; }
+p24 'gh issue view 8419 -R emilk/egui' | "$S/record-issue-view.sh" >/dev/null
+p24 'gh issue view https://github.com/emilk/egui/issues/8420' | "$S/record-issue-view.sh" >/dev/null
+[ -f "$TICKETS_STATE_DIR/$S24.json" ] && { fail=$((fail+1)); echo "  FAIL an upstream issue seeded $(jq -c '.issues|keys' "$TICKETS_STATE_DIR/$S24.json")"; } || { pass=$((pass+1)); echo "  ok   -R and URL reads of another repo seed nothing"; }
+p24 'gh issue view 15 --repo me/mine' | "$S/record-issue-view.sh" >/dev/null
+jq -e '.issues["15"].state == "undecided"' "$TICKETS_STATE_DIR/$S24.json" >/dev/null && { pass=$((pass+1)); echo "  ok   -R naming this repo still records"; } || { fail=$((fail+1)); echo "  FAIL -R naming this repo recorded nothing"; }
+
+echo "== 25. a stale claim on a CLOSED issue is not a collision =="
+out="$(view 'gh issue view 778' | "$S/record-issue-view.sh")"
+printf '%s' "$out" | grep -q 'COLLISION' && { fail=$((fail+1)); echo "  FAIL closed issue reported as a collision"; } || { pass=$((pass+1)); echo "  ok   closed issue raises no collision"; }
+
+echo "== 26. a claim the ledger missed is found on GitHub before blocking =="
+# The stub carries this session's claim on 802 only.
+jq -n '{issues:{"802":{state:"undecided",seen:1,nagged:0}},injected:[]}' > "$TICKETS_STATE_DIR/$SID.json"
+mutate Edit | "$S/require-claim.sh" 2>/dev/null; ck "an issue already claimed on GitHub does not block" 0 $?
+jq -e '.issues["802"].state == "claimed"' "$TICKETS_STATE_DIR/$SID.json" >/dev/null && { pass=$((pass+1)); echo "  ok   the GitHub claim is written back to the ledger"; } || { fail=$((fail+1)); echo "  FAIL ledger still says $(jq -r '.issues["802"].state' "$TICKETS_STATE_DIR/$SID.json")"; }
+jq -n '{issues:{"338":{state:"undecided",seen:1,nagged:0}},injected:[]}' > "$TICKETS_STATE_DIR/$SID.json"
+mutate Edit | "$S/require-claim.sh" 2>/dev/null; ck "an issue with no claim on GitHub still blocks" 2 $?
+
+echo "== 27. a claim and a view in one call: the claim survives the parallel hooks =="
+lost=0
+for i in $(seq 1 15); do
+  R="27272727-1111-2222-3333-4444444444$(printf '%02d' "$i")"
+  c="gh issue view 900 && gh issue comment 900 --body 'Claimed - session $R'"
+  in="$(jq -n --arg s "$R" --arg c "$c" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:""}}')"
+  printf '%s' "$in" | "$S/record-issue-view.sh" >/dev/null &
+  printf '%s' "$in" | "$S/record-claim.sh" >/dev/null &
+  wait
+  jq -e '.issues["900"].state == "claimed"' "$TICKETS_STATE_DIR/$R.json" >/dev/null || lost=$((lost+1))
+done
+[ "$lost" = "0" ] && { pass=$((pass+1)); echo "  ok   15 of 15 parallel runs kept the claim"; } || { fail=$((fail+1)); echo "  FAIL the view hook overwrote the claim in $lost of 15 runs"; }
 
 echo
 echo "pass=$pass fail=$fail"

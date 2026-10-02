@@ -48,6 +48,8 @@ SESSION="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SESSION" ] || exit 0
 
 NOW="$(date +%s)"
+CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
+ledger_lock "$SESSION"
 
 # A branch or worktree named `issue-<N>` is a claim-worthy signal the ledger
 # never heard: a session handed a ready worktree does its reading in the
@@ -78,17 +80,29 @@ UNDECIDED="$(printf '%s' "$STATE" | jq -r '
 ' 2>/dev/null)" || exit 0
 [ -n "$UNDECIDED" ] || exit 0
 
+# Only issues about to block are checked, at most ten per call, so a quiet
+# session never pays for the lookup.
 DUE=""
+CHECKED=0
 for n in $UNDECIDED; do
+  if ledger_may_nag "$STATE" "$n" "$NOW" && [ "$CHECKED" -lt 10 ]; then
+    CHECKED=$((CHECKED + 1))
+
+    if claimed_on_github "$n" "$SESSION" "$CWD"; then
+      STATE="$(ledger_set_state "$STATE" "$n" "claimed" "$NOW")"
+      continue
+    fi
+  fi
+
   if ledger_may_nag "$STATE" "$n" "$NOW"; then
     DUE="${DUE:+$DUE }#$n"
     STATE="$(ledger_note_nagged "$STATE" "$n" "$NOW")"
   fi
 done
 
-[ -n "$DUE" ] || exit 0
-
 ledger_write "$SESSION" "$STATE"
+
+[ -n "$DUE" ] || exit 0
 
 FIRST="$(printf '%s' "$DUE" | tr ' ' '\n' | head -1 | tr -d '#')"
 

@@ -38,6 +38,7 @@ if [ -z "$SESSION" ]; then
 fi
 
 NOW="$(date +%s)"
+ledger_lock "$SESSION"
 STATE="$(ledger_read "$SESSION")"
 
 case "$ACTION" in

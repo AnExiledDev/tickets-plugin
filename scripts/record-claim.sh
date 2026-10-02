@@ -40,5 +40,6 @@ $(body_file_text "$CMD")"
 printf '%s' "$BODY" | grep -qF "$SESSION" || exit 0
 
 NOW="$(date +%s)"
+ledger_lock "$SESSION"
 ledger_write "$SESSION" "$(ledger_set_state "$(ledger_read "$SESSION")" "$ISSUE" "claimed" "$NOW")"
 exit 0

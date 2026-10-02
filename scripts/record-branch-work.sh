@@ -28,5 +28,6 @@ SESSION="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SESSION" ] || exit 0
 
 NOW="$(date +%s)"
+ledger_lock "$SESSION"
 ledger_write "$SESSION" "$(ledger_note_seen "$(ledger_read "$SESSION")" "$ISSUE" "$NOW")"
 exit 0
