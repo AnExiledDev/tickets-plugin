@@ -376,6 +376,13 @@ jq -n --arg s "$R30" --arg c "gh issue comment 931 --body 'claiming, session $R3
 [ $(( $(date +%s) - START )) -lt 15 ] && jq -e '.issues["931"].state == "claimed"' "$TICKETS_STATE_DIR/$R30.json" >/dev/null
 ck "a lock left by a dead hook is taken over at once" 0 $?
 
+R30P="30303030-nopid-2222-3333-444444444444"
+mkdir -p "$TICKETS_STATE_DIR/$R30P.json.lockdir" && touch -d '2 minutes ago' "$TICKETS_STATE_DIR/$R30P.json.lockdir"
+START=$(date +%s)
+jq -n --arg s "$R30P" --arg c "gh issue comment 933 --body 'claiming, session $R30P'" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c}}' \
+  | TICKETS_LOCK_WAIT=30 PATH="$NOFLOCK_PATH" "$S/record-claim.sh" >/dev/null
+[ $(( $(date +%s) - START )) -lt 15 ]; ck "a lock with no pid after a minute is taken over at once" 0 $?
+
 R30L="30303030-live-2222-3333-444444444444"
 mkdir -p "$TICKETS_STATE_DIR/$R30L.json.lockdir" && echo "$$" > "$TICKETS_STATE_DIR/$R30L.json.lockdir/pid"
 jq -n --arg s "$R30L" --arg c "gh issue comment 932 --body 'claiming, session $R30L'" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c}}' \

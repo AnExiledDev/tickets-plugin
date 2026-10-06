@@ -123,7 +123,7 @@ ledger_dir_lock() {
 
   while ! mkdir "$dir" 2>/dev/null; do
     holder="$(cat "$dir/pid" 2>/dev/null)"
-    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+    if ledger_lock_is_stale "$dir" "$holder"; then
       rm -rf "$dir"
       continue
     fi
@@ -136,6 +136,16 @@ ledger_dir_lock() {
   echo "$$" > "$dir/pid"
   LEDGER_LOCK_DIR="$dir"
   trap ledger_dir_unlock EXIT
+}
+
+# Stale when its holder is dead, or when it has no pid a minute after mkdir
+# (a hook killed between taking the lock and writing its pid).
+ledger_lock_is_stale() {
+  if [ -n "$2" ]; then
+    ! kill -0 "$2" 2>/dev/null
+  else
+    [ -n "$(find "$1" -maxdepth 0 -mmin +1 2>/dev/null)" ]
+  fi
 }
 
 ledger_dir_unlock() {
