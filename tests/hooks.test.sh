@@ -309,6 +309,35 @@ PATH="$BROKEN:$PATH" "$S/validate-issue.sh" --file "$BODY" >/dev/null; ck "a com
 sed -i '/## Edge cases/d' "$BODY"
 PATH="$BROKEN:$PATH" "$S/validate-issue.sh" --file "$BODY" >/dev/null; ck "a missing section is still caught" 1 $?
 
+echo "== 29. values from a CRLF jq carry no trailing carriage return =="
+# jq built for Windows writes CRLF, so "$(jq -r ...)" kept a \r: the session id
+# named the wrong state file and the cwd matched no directory. The fake jq below
+# behaves like it (CRLF unless -b) and runs the real one without -b, which jq 1.6
+# does not know.
+CRLF="$SCRATCH/crlf-jq"
+mkdir -p "$CRLF"
+cat > "$CRLF/jq" <<STUB
+#!/usr/bin/env bash
+binary=0; args=()
+for arg in "\$@"; do
+  if [ "\$arg" = "-b" ]; then binary=1; else args+=("\$arg"); fi
+done
+if [ "\$binary" = 1 ]; then exec $(command -v jq) "\${args[@]}"; fi
+$(command -v jq) "\${args[@]}" | sed 's/\$/\r/'
+exit "\${PIPESTATUS[0]}"
+STUB
+chmod +x "$CRLF/jq"
+R29="29292929-1111-2222-3333-444444444444"
+jq -n --arg s "$R29" --arg c "gh issue comment 929 --body 'claiming, session $R29'" \
+  '{session_id:$s,tool_name:"Bash",tool_input:{command:$c}}' \
+  | OSTYPE=msys PATH="$CRLF:$PATH" "$S/record-claim.sh" >/dev/null
+[ -f "$TICKETS_STATE_DIR/$R29.json" ]; ck "a claim lands in the session's own state file" 0 $?
+mkdir -p "$SCRATCH/cwd29"
+cp "$BODY" "$SCRATCH/cwd29/body.md"
+echo "## Edge cases" >> "$SCRATCH/cwd29/body.md"
+jq -n --arg d "$SCRATCH/cwd29" '{cwd:$d,tool_name:"Bash",tool_input:{command:"gh issue create --label bug --body-file body.md"}}' \
+  | OSTYPE=msys PATH="$CRLF:$PATH" "$S/validate-issue.sh" 2>/dev/null; ck "a relative --body-file resolves against the hook's cwd" 0 $?
+
 echo
 echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]
