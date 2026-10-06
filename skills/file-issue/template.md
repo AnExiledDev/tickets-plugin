@@ -40,7 +40,7 @@ None - can start immediately
 
 ### Provenance mark (first two lines)
 
-Output of `intent mark <tier>`, pasted verbatim. Tier 1 by default; tiers 2–4 only with an `op:` citation (see `human-intent.md`). Never hand-type the claim.
+Output of the hub MCP tool `intent_mark` (or `intent mark <tier>` on the hub), pasted verbatim. Tier 1 by default; tiers 2–4 only with an `op:` citation (see `human-intent.md`). Never hand-type the claim.
 
 ### `Consequence:` / `Done when:`
 

@@ -1,7 +1,7 @@
 ---
 description: File a well-shaped, self-contained GitHub issue. Use whenever creating an issue or ticket, deferring discovered work to the tracker, converting a finding/plan item into tracked work, or when the user says "file an issue", "make a ticket", "defer this". Produces issues an AI can work from "Work issue #123" alone.
 argument-hint: "[repo] [what the ticket is about]"
-allowed-tools: Bash(gh repo view:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh pr list:*), Bash(gh search:*), Bash(date:*), Bash(intent:*), Bash(/home/deploy/.claude/skills/tickets/scripts/validate-issue.sh:*)
+allowed-tools: Bash(gh repo view:*), Bash(gh label list:*), Bash(gh label create:*), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh pr list:*), Bash(gh search:*), Bash(date:*), Bash(intent:*), mcp__hub__intent_find, mcp__hub__intent_mark, Bash(/home/deploy/.claude/skills/tickets/scripts/validate-issue.sh:*)
 ---
 
 # File an issue
@@ -35,7 +35,7 @@ Collect exactly what the worker needs, and only from where the change lives:
 
 ## 4. Capture human intent
 
-Search the intent ledger (`intent find <terms>`) for anything the operator said that bears on this work. Quote it **verbatim** with its `op:` ref and date in the `## Human intent` section — never paraphrase. If nothing exists, write `None — agent-inferred.` Then generate the provenance mark: `intent mark 1` (or tier 2–4 with `--source op:...` when you can cite direction) and paste its two lines at the very top of the body.
+Search the intent ledger (the hub MCP tool `intent_find`, with `raw` for everything the operator typed; `intent find <terms>` in a hub shell) for anything the operator said that bears on this work. Quote it **verbatim** with its `op:` ref and date in the `## Human intent` section — never paraphrase. If nothing exists, write `None — agent-inferred.` Then generate the provenance mark with the hub MCP tool `intent_mark` (tier 1, or tier 2–4 with `source: op:...` when you can cite direction; pass this session's id as `session`) and paste its two lines at the very top of the body. `intent mark` in a shell does the same on the hub; client machines do not have it.
 
 ## 5. Draft the body
 

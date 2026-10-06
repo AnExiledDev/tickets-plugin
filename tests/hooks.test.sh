@@ -278,6 +278,37 @@ for i in $(seq 1 15); do
 done
 [ "$lost" = "0" ] && { pass=$((pass+1)); echo "  ok   15 of 15 parallel runs kept the claim"; } || { fail=$((fail+1)); echo "  FAIL the view hook overwrote the claim in $lost of 15 runs"; }
 
+echo "== 28. a complete body passes where grep aborts on -i with -F =="
+# Git for Windows ships grep 3.0, which aborts (exit 134) on any -iF; the
+# validator read that as "missing" and refused every complete issue body there.
+BROKEN="$SCRATCH/broken-grep"
+mkdir -p "$BROKEN"
+cat > "$BROKEN/grep" <<STUB
+#!/bin/sh
+for arg in "\$@"; do
+  case "\$arg" in --) break ;; -*i*F*|-*F*i*) exit 134 ;; esac
+done
+exec $(command -v grep) "\$@"
+STUB
+chmod +x "$BROKEN/grep"
+BODY="$SCRATCH/complete-body.md"
+cat > "$BODY" <<'BODY'
+> **AI-written.** No human has read this.
+consequence: the operator waits
+DONE WHEN: the repo has X
+## problem
+## Human intent
+## Context
+## Acceptance criteria
+## Verification
+## Edge cases
+## Out of scope
+## Blocked by
+BODY
+PATH="$BROKEN:$PATH" "$S/validate-issue.sh" --file "$BODY" >/dev/null; ck "a complete body in any case passes under a grep that aborts on -iF" 0 $?
+sed -i '/## Edge cases/d' "$BODY"
+PATH="$BROKEN:$PATH" "$S/validate-issue.sh" --file "$BODY" >/dev/null; ck "a missing section is still caught" 1 $?
+
 echo
 echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]
