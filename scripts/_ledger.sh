@@ -35,6 +35,7 @@ TICKETS_STATE_DIR="${TICKETS_STATE_DIR:-$HOME/.claude/state/tickets}"
 TICKETS_INJECT_WINDOW="${TICKETS_INJECT_WINDOW:-600}"   # burst window, seconds
 TICKETS_INJECT_BURST="${TICKETS_INJECT_BURST:-3}"       # injections per window
 TICKETS_NAG_COOLDOWN="${TICKETS_NAG_COOLDOWN:-600}"     # re-block the same issue no sooner than this
+TICKETS_LOCK_WAIT="${TICKETS_LOCK_WAIT:-5}"             # seconds a hook waits for the ledger lock
 
 ledger_ok() { command -v jq >/dev/null 2>&1; }
 
@@ -99,12 +100,46 @@ ledger_path() { printf '%s/%s.json' "$TICKETS_STATE_DIR" "$1"; }
 # and record-claim both read the ledger, both write it, and the slower one wins:
 # a claim posted in the same Bash call as a view (or beside a branch command)
 # was overwritten with "undecided". Each hook takes this lock before its first
-# read and holds it until it exits. No flock, no lock: fail open.
+# read and holds it until it exits. A lock not granted within
+# TICKETS_LOCK_WAIT seconds is skipped: fail open.
 ledger_lock() {
-  command -v flock >/dev/null 2>&1 || return 0
   mkdir -p "$TICKETS_STATE_DIR" 2>/dev/null || return 0
-  exec 9>"$(ledger_path "$1").lock" 2>/dev/null || return 0
-  flock -w 5 9 2>/dev/null || true
+
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$(ledger_path "$1").lock" 2>/dev/null || return 0
+    flock -w "$TICKETS_LOCK_WAIT" 9 2>/dev/null || true
+  else
+    ledger_dir_lock "$(ledger_path "$1").lockdir"
+  fi
+}
+
+# The lock where flock is missing (Git for Windows, macOS): mkdir is atomic
+# everywhere. The holder's pid sits inside so a lock left by a killed hook is
+# taken over at once instead of costing every later hook the full wait. The
+# release is an EXIT trap, so a hook that sets its own EXIT trap must call
+# ledger_dir_unlock from it.
+ledger_dir_lock() {
+  local dir="$1" tries=$((TICKETS_LOCK_WAIT * 20)) holder
+
+  while ! mkdir "$dir" 2>/dev/null; do
+    holder="$(cat "$dir/pid" 2>/dev/null)"
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$dir"
+      continue
+    fi
+
+    tries=$((tries - 1))
+    [ "$tries" -gt 0 ] || return 0
+    sleep 0.05
+  done
+
+  echo "$$" > "$dir/pid"
+  LEDGER_LOCK_DIR="$dir"
+  trap ledger_dir_unlock EXIT
+}
+
+ledger_dir_unlock() {
+  [ "$(cat "$LEDGER_LOCK_DIR/pid" 2>/dev/null)" = "$$" ] && rm -rf "$LEDGER_LOCK_DIR"
 }
 
 # The owner/repo a `gh issue` command names with -R/--repo or an issue URL,

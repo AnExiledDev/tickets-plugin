@@ -338,6 +338,50 @@ echo "## Edge cases" >> "$SCRATCH/cwd29/body.md"
 jq -n --arg d "$SCRATCH/cwd29" '{cwd:$d,tool_name:"Bash",tool_input:{command:"gh issue create --label bug --body-file body.md"}}' \
   | OSTYPE=msys PATH="$CRLF:$PATH" "$S/validate-issue.sh" 2>/dev/null; ck "a relative --body-file resolves against the hook's cwd" 0 $?
 
+echo "== 30. without flock the parallel hooks still serialize (Git Bash, macOS) =="
+# Git for Windows ships no flock, so the ledger lock was a no-op there and case
+# 27 lost the claim in about a third of runs. NOFLOCK is a PATH with every
+# program in /usr/bin and /bin except flock; where flock is already missing,
+# the normal PATH is that already.
+NOFLOCK_PATH="$PATH"
+if command -v flock >/dev/null 2>&1; then
+  NOFLOCK="$SCRATCH/noflock"
+  mkdir -p "$NOFLOCK"
+  for f in /usr/bin/* /bin/*; do
+    [ "${f##*/}" = flock ] || [ -e "$NOFLOCK/${f##*/}" ] || ln -s "$f" "$NOFLOCK/${f##*/}"
+  done
+  NOFLOCK_PATH="$STUB:$NOFLOCK"
+fi
+PATH="$NOFLOCK_PATH" bash -c 'command -v flock' >/dev/null; ck "the test PATH really has no flock" 1 $?
+lost=0
+for i in $(seq 1 15); do
+  R="30303030-1111-2222-3333-4444444444$(printf '%02d' "$i")"
+  c="gh issue view 900 && gh issue comment 900 --body 'Claimed - session $R'"
+  in="$(jq -n --arg s "$R" --arg c "$c" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c},tool_response:{stdout:""}}')"
+  printf '%s' "$in" | PATH="$NOFLOCK_PATH" "$S/record-issue-view.sh" >/dev/null &
+  printf '%s' "$in" | PATH="$NOFLOCK_PATH" "$S/record-claim.sh" >/dev/null &
+  wait
+  jq -e '.issues["900"].state == "claimed"' "$TICKETS_STATE_DIR/$R.json" >/dev/null || lost=$((lost+1))
+done
+[ "$lost" = "0" ] && { pass=$((pass+1)); echo "  ok   15 of 15 parallel runs kept the claim without flock"; } || { fail=$((fail+1)); echo "  FAIL without flock the view hook overwrote the claim in $lost of 15 runs"; }
+ls -d "$TICKETS_STATE_DIR"/*.lockdir >/dev/null 2>&1; ck "every hook released its lock on exit" 2 $?
+
+R30="30303030-dead-2222-3333-444444444444"
+DEAD="$(sh -c 'echo $$')"
+mkdir -p "$TICKETS_STATE_DIR/$R30.json.lockdir" && echo "$DEAD" > "$TICKETS_STATE_DIR/$R30.json.lockdir/pid"
+START=$(date +%s)
+jq -n --arg s "$R30" --arg c "gh issue comment 931 --body 'claiming, session $R30'" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c}}' \
+  | TICKETS_LOCK_WAIT=3 PATH="$NOFLOCK_PATH" "$S/record-claim.sh" >/dev/null
+[ $(( $(date +%s) - START )) -lt 2 ] && jq -e '.issues["931"].state == "claimed"' "$TICKETS_STATE_DIR/$R30.json" >/dev/null
+ck "a lock left by a dead hook is taken over at once" 0 $?
+
+R30L="30303030-live-2222-3333-444444444444"
+mkdir -p "$TICKETS_STATE_DIR/$R30L.json.lockdir" && echo "$$" > "$TICKETS_STATE_DIR/$R30L.json.lockdir/pid"
+jq -n --arg s "$R30L" --arg c "gh issue comment 932 --body 'claiming, session $R30L'" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c}}' \
+  | TICKETS_LOCK_WAIT=1 PATH="$NOFLOCK_PATH" timeout 10 "$S/record-claim.sh" >/dev/null
+ck "a lock held past the wait fails open instead of blocking" 0 $?
+[ -d "$TICKETS_STATE_DIR/$R30L.json.lockdir" ]; ck "a hook that never got the lock leaves the holder's lock alone" 0 $?
+
 echo
 echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]
