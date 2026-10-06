@@ -371,8 +371,9 @@ DEAD="$(sh -c 'echo $$')"
 mkdir -p "$TICKETS_STATE_DIR/$R30.json.lockdir" && echo "$DEAD" > "$TICKETS_STATE_DIR/$R30.json.lockdir/pid"
 START=$(date +%s)
 jq -n --arg s "$R30" --arg c "gh issue comment 931 --body 'claiming, session $R30'" '{session_id:$s,tool_name:"Bash",tool_input:{command:$c}}' \
-  | TICKETS_LOCK_WAIT=3 PATH="$NOFLOCK_PATH" "$S/record-claim.sh" >/dev/null
-[ $(( $(date +%s) - START )) -lt 2 ] && jq -e '.issues["931"].state == "claimed"' "$TICKETS_STATE_DIR/$R30.json" >/dev/null
+  | TICKETS_LOCK_WAIT=30 PATH="$NOFLOCK_PATH" "$S/record-claim.sh" >/dev/null
+# Far under the 30 s wait; one hook alone takes about 2 s on Windows.
+[ $(( $(date +%s) - START )) -lt 15 ] && jq -e '.issues["931"].state == "claimed"' "$TICKETS_STATE_DIR/$R30.json" >/dev/null
 ck "a lock left by a dead hook is taken over at once" 0 $?
 
 R30L="30303030-live-2222-3333-444444444444"
