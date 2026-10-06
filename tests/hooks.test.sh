@@ -338,6 +338,19 @@ echo "## Edge cases" >> "$SCRATCH/cwd29/body.md"
 jq -n --arg d "$SCRATCH/cwd29" '{cwd:$d,tool_name:"Bash",tool_input:{command:"gh issue create --label bug --body-file body.md"}}' \
   | OSTYPE=msys PATH="$CRLF:$PATH" "$S/validate-issue.sh" 2>/dev/null; ck "a relative --body-file resolves against the hook's cwd" 0 $?
 
+# A Windows drive path is absolute. Prefixed with the hook's cwd it names a file
+# that does not exist, and a complete body is blocked as unreadable. Here the
+# drive "folders" sit in the hook process's own dir, away from the payload cwd,
+# so only an unprefixed path finds them.
+mkdir -p "$SCRATCH/drive29/D:/x"
+cp "$SCRATCH/cwd29/body.md" "$SCRATCH/drive29/D:/x/body.md"
+cp "$SCRATCH/cwd29/body.md" "$SCRATCH/drive29/D:\\x\\body.md"
+for f in 'D:/x/body.md' 'D:\x\body.md'; do
+  jq -n --arg d "$SCRATCH/cwd29" --arg c "gh issue create --label bug --body-file $f" '{cwd:$d,tool_name:"Bash",tool_input:{command:$c}}' \
+    | (cd "$SCRATCH/drive29" && OSTYPE=msys PATH="$CRLF:$PATH" "$S/validate-issue.sh" 2>/dev/null)
+  ck "a --body-file of $f is read as absolute" 0 $?
+done
+
 echo "== 30. without flock the parallel hooks still serialize (Git Bash, macOS) =="
 # Git for Windows ships no flock, so the ledger lock was a no-op there and case
 # 27 lost the claim in about a third of runs. NOFLOCK is a PATH with every

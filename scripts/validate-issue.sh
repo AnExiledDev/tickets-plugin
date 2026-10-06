@@ -150,7 +150,7 @@ while IFS= read -r token; do
   file=$(sed -E 's/^(--body-file|--input|-F)[= ]//' <<<"$token" | tr -d '"'"'")
   case "$file" in
     -|*'$'*|*'`'*) INDIRECT_BODY=1; continue ;;
-    /*) : ;;
+    /*|[A-Za-z]:[/\\]*) : ;;
     *) file="${CWD:-.}/$file" ;;
   esac
   if [ -r "$file" ]; then
