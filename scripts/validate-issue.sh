@@ -19,7 +19,7 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 # label|pattern1|pattern2...  — a check passes when ANY pattern is present
 # (case-insensitive, fixed string).
 REQUIRED_CHECKS=(
-  "provenance mark (run \`intent mark\`; body must start with the AI-written claim + session trailer)|AI-written"
+  "provenance mark (the hub MCP tool \`intent_mark\` prints it; body must start with the AI-written claim + session trailer)|AI-written"
   "Consequence: line (or Icebox: line for iceboxed issues)|Consequence:|Icebox:"
   "Done when: line naming a state of the repo|Done when:"
   "## Problem or ## What to build section|## Problem|## What to build"
@@ -32,6 +32,12 @@ REQUIRED_CHECKS=(
   "## Blocked by section (or 'None - can start immediately')|## Blocked by"
 )
 
+# contains_ci <text> <fixed string>: a case-insensitive substring test in bash
+# itself, because Git for Windows' grep 3.0 aborts (exit 134) on any `grep -iF`.
+contains_ci() {
+  [[ "${1,,}" == *"${2,,}"* ]]
+}
+
 collect_missing() {
   local body="$1" check label patterns found pattern pats
   MISSING=()
@@ -43,7 +49,7 @@ collect_missing() {
 
     IFS='|' read -ra pats <<<"$patterns"
     for pattern in "${pats[@]}"; do
-      if grep -qiF -- "$pattern" <<<"$body"; then
+      if contains_ci "$body" "$pattern"; then
         found=1
         break
       fi
@@ -151,7 +157,7 @@ done < <(grep -oE '(--body-file|--input|-F)([= ])[^[:space:]]+' <<<"$CMD")
 collect_missing "$BODY_TEXT"
 
 # Label convention: every issue carries at least one label (see labels.md).
-if ! grep -qE '(--label|-l)([= ]|$)' <<<"$CMD" && ! grep -qiF '"labels"' <<<"$CMD" && ! grep -qE '\-[fF][[:space:]]+["'\'']?labels' <<<"$CMD"; then
+if ! grep -qE '(--label|-l)([= ]|$)' <<<"$CMD" && ! contains_ci "$CMD" '"labels"' && ! grep -qE '\-[fF][[:space:]]+["'\'']?labels' <<<"$CMD"; then
   MISSING+=("at least one --label (see labels.md: one type label, plus icebox/needs-human/blocked when they apply)")
 fi
 
