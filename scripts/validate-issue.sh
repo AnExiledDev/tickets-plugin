@@ -14,6 +14,13 @@
 # upstream on a third-party repo.
 set -u
 
+# jq built for Windows writes CRLF, which leaves a \r on every "$(jq -r ...)"
+# value; -b stops it. Defined only when this jq takes -b (1.7+), so a missing or
+# older jq behaves exactly as before.
+case "${OSTYPE:-}" in
+  msys* | cygwin*) command jq -b -n 1 >/dev/null 2>&1 && jq() { command jq -b "$@"; } ;;
+esac
+
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 # label|pattern1|pattern2...  — a check passes when ANY pattern is present

@@ -20,6 +20,13 @@
 # tripwires, not security gates, and a broken tripwire must never be the
 # thing that stops a session.
 
+# jq built for Windows writes CRLF, which leaves a \r on every "$(jq -r ...)"
+# value; -b stops it. Defined only when this jq takes -b (1.7+), so a missing or
+# older jq behaves exactly as before.
+case "${OSTYPE:-}" in
+  msys* | cygwin*) command jq -b -n 1 >/dev/null 2>&1 && jq() { command jq -b "$@"; } ;;
+esac
+
 TICKETS_STATE_DIR="${TICKETS_STATE_DIR:-$HOME/.claude/state/tickets}"
 
 # Reminders are a courtesy; the ledger is the enforcement. Suppressing an
