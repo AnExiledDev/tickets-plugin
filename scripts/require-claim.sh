@@ -5,7 +5,8 @@
 # This is the "claim before work starts" gate. It fires on the earliest action
 # that is unambiguously work rather than reading:
 #
-#   Edit / Write     the session is doing the work itself
+#   Edit / Write     the session is doing the work itself, on a file inside
+#                    its own repository (a scratch file in /tmp is not work)
 #   Task             the session is orchestrating - this is the one that
 #                    matters, because an orchestrator's own tree stays clean
 #                    while subagents do every edit
@@ -49,6 +50,63 @@ SESSION="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 
 NOW="$(date +%s)"
 CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
+
+# An absolute path with every symlink resolved, for a file that may not exist
+# yet. `realpath -m` where it works (GNU, Git Bash); elsewhere (macOS) the
+# nearest existing ancestor is resolved and the rest appended as written.
+resolve_path() {
+  local path="$1" dir rest="" parent
+
+  case "$path" in
+    [A-Za-z]:*) path="$(printf '%s' "$path" | tr '\\' '/')" ;;
+  esac
+
+  realpath -m -- "$path" 2>/dev/null && return 0
+
+  dir="$path"
+  while [ ! -d "$dir" ]; do
+    parent="${dir%/*}"
+    [ "$parent" != "$dir" ] || { printf '%s\n' "$path"; return 0; }
+    rest="/${dir##*/}$rest"
+    dir="${parent:-/}"
+  done
+
+  printf '%s%s\n' "$(cd "$dir" 2>/dev/null && pwd -P)" "$rest" | sed 's#^//*#/#'
+}
+
+# True when an Edit, Write or NotebookEdit targets a file outside the session's
+# repository: drafting an issue body in /tmp is not work on any issue. Without
+# a repository to compare against (no cwd, or a cwd outside git) nothing is
+# outside, so the call stays gated exactly as before. Task, Agent and git
+# commit name no file and always stay gated.
+target_is_outside_repo() {
+  local path top
+
+  case "$TOOL" in
+    Edit|Write) path="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)" ;;
+    NotebookEdit) path="$(printf '%s' "$INPUT" | jq -r '.tool_input.notebook_path // empty' 2>/dev/null)" ;;
+    *) return 1 ;;
+  esac
+  [ -n "$path" ] && [ -n "$CWD" ] || return 1
+
+  top="$(timeout 5 git -C "$CWD" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ -n "$top" ] || return 1
+
+  case "$path" in
+    /*|[A-Za-z]:[/\\]*) ;;
+    *) path="$CWD/$path" ;;
+  esac
+  path="$(resolve_path "$path")"
+  top="$(resolve_path "$top")"
+
+  case "$path/" in
+    "$top"/*) return 1 ;;
+  esac
+  return 0
+}
+
+target_is_outside_repo && exit 0
+
 ledger_lock "$SESSION"
 
 # A branch or worktree named `issue-<N>` is a claim-worthy signal the ledger
