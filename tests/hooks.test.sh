@@ -226,7 +226,7 @@ S21="21212121-1111-2222-3333-444444444444"
 REPO="$SCRATCH/wt-issue-321"
 git init -q "$REPO" && git -C "$REPO" checkout -q -b issue-321-thing
 git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m seed
-jq -n --arg s "$S21" --arg d "$REPO" '{session_id:$s,cwd:$d,tool_name:"Edit",tool_input:{file_path:"/tmp/x"}}' | "$S/require-claim.sh" >/dev/null 2>&1; ck "an edit on an issue-321 branch is gated" 2 $?
+jq -n --arg s "$S21" --arg d "$REPO" '{session_id:$s,cwd:$d,tool_name:"Edit",tool_input:{file_path:($d + "/x")}}' | "$S/require-claim.sh" >/dev/null 2>&1; ck "an edit on an issue-321 branch is gated" 2 $?
 jq -e '.issues["321"].state == "undecided"' "$TICKETS_STATE_DIR/$S21.json" >/dev/null && { pass=$((pass+1)); echo "  ok   the branch name seeded 321"; } || { fail=$((fail+1)); echo "  FAIL branch name seeded nothing"; }
 
 S22="22222222-1111-2222-3333-444444444444"
@@ -402,6 +402,69 @@ jq -n --arg s "$R30L" --arg c "gh issue comment 932 --body 'claiming, session $R
   | TICKETS_LOCK_WAIT=1 PATH="$NOFLOCK_PATH" timeout 10 "$S/record-claim.sh" >/dev/null
 ck "a lock held past the wait fails open instead of blocking" 0 $?
 [ -d "$TICKETS_STATE_DIR/$R30L.json.lockdir" ]; ck "a hook that never got the lock leaves the holder's lock alone" 0 $?
+
+echo "== 31. only a file inside the session's repository is work =="
+# Drafting an issue body in /tmp was blocked like a source edit. The ceiling
+# keeps git from finding a repository above the scratch dir, so the "cwd outside
+# git" case means what it says wherever the suite runs.
+S31="31313131-1111-2222-3333-444444444444"
+R31="$SCRATCH/repo31"
+git init -q "$R31"
+git -C "$R31" -c user.email=t@t -c user.name=t commit -q --allow-empty -m seed
+git -C "$R31" worktree add "$R31/.claude/worktrees/w31" >/dev/null 2>&1
+mkdir -p "$SCRATCH/plain31"
+jq -n '{issues:{"338":{state:"undecided",seen:1,nagged:0}},injected:[]}' > "$TICKETS_STATE_DIR/$S31.json"
+p31() { # p31 <tool> <input-key> <value> [cwd, "" for none; default the repo]
+  jq -n --arg s "$S31" --arg t "$1" --arg k "$2" --arg v "$3" --arg d "${4-$R31}" \
+    '{session_id:$s,tool_name:$t,tool_input:{($k):$v}} + (if $d=="" then {} else {cwd:$d} end)'; }
+gate31() { TICKETS_NAG_COOLDOWN=0 GIT_CEILING_DIRECTORIES="$SCRATCH" "$S/require-claim.sh"; }
+
+p31 Write file_path /tmp/x.md | gate31 2>/dev/null; ck "a Write to /tmp from inside a repo passes" 0 $?
+err="$(p31 Write file_path "$R31/src/a.md" | gate31 2>&1 >/dev/null)"; ck "a Write to a new file inside the repo is gated" 2 $?
+printf '%s' "$err" | grep -q 'CLAIM FIRST' && printf '%s' "$err" | grep -q '#338' && { pass=$((pass+1)); echo "  ok   the block names CLAIM FIRST and #338 on stderr"; } || { fail=$((fail+1)); echo "  FAIL block stderr was '$err'"; }
+p31 Edit file_path src/b.md | gate31 2>/dev/null; ck "a relative path resolves against the cwd, inside" 2 $?
+p31 Edit file_path ../outside31.md | gate31 2>/dev/null; ck "a relative path climbing out of the repo passes" 0 $?
+p31 Write file_path "$R31/.claude/worktrees/w31/c.md" | gate31 2>/dev/null; ck "a worktree under the repo counts as inside" 2 $?
+p31 Write file_path "$R31/.claude/worktrees/w31/c.md" "$R31/.claude/worktrees/w31" | gate31 2>/dev/null; ck "a session in that worktree is gated in it" 2 $?
+p31 NotebookEdit notebook_path "$SCRATCH/n.ipynb" | gate31 2>/dev/null; ck "NotebookEdit reads notebook_path: outside passes" 0 $?
+p31 NotebookEdit notebook_path "$R31/n.ipynb" | gate31 2>/dev/null; ck "NotebookEdit inside the repo is gated" 2 $?
+p31 Task file_path /tmp/x | gate31 2>/dev/null; ck "Task stays gated whatever path it carries" 2 $?
+p31 Agent file_path /tmp/x | gate31 2>/dev/null; ck "Agent stays gated" 2 $?
+p31 Bash command "git commit -m x" | gate31 2>/dev/null; ck "git commit stays gated" 2 $?
+p31 Write file_path /tmp/x.md "$SCRATCH/plain31" | gate31 2>/dev/null; ck "a cwd outside git keeps today's gate" 2 $?
+p31 Write file_path /tmp/x.md "" | gate31 2>/dev/null; ck "no cwd keeps today's gate" 2 $?
+
+# The claude-setup shape: a symlink outside the repo naming a path inside it.
+# Git Bash without symlink rights copies on ln -s, which tests nothing.
+ln -s "$R31" "$SCRATCH/link31" 2>/dev/null
+if [ -L "$SCRATCH/link31" ]; then
+  p31 Write file_path "$SCRATCH/link31/d.md" | gate31 2>/dev/null; ck "a symlink into the repo is resolved and gated" 2 $?
+else
+  echo "  SKIP symlink into the repo (ln -s made a copy here)"
+fi
+
+echo "== 32. a block always explains itself on stderr, with or without flock =="
+# The 2026-10-08 report: "PreToolUse:Write hook error: ... No stderr output".
+# ledger_lock's `exec 9>lock 2>/dev/null` sent the hook's own stderr to
+# /dev/null for the rest of its run wherever flock exists, so the CLAIM FIRST
+# text went nowhere and only the exit 2 arrived.
+for lock in flock noflock; do
+  [ "$lock" = flock ] && lockpath="$PATH" || lockpath="$NOFLOCK_PATH"
+  err="$(p31 Edit file_path "$R31/e.md" | PATH="$lockpath" TICKETS_NAG_COOLDOWN=0 "$S/require-claim.sh" 2>&1 >/dev/null)"
+  ck "the block exits 2 ($lock)" 2 $?
+  printf '%s' "$err" | grep -q 'CLAIM FIRST' && { pass=$((pass+1)); echo "  ok   stderr carries the message ($lock)"; } || { fail=$((fail+1)); echo "  FAIL stderr empty or wrong ($lock): '$err'"; }
+done
+
+if command -v flock >/dev/null 2>&1; then
+  OLD32="$SCRATCH/old-lock"
+  mkdir -p "$OLD32"
+  cp "$S/require-claim.sh" "$OLD32/"
+  sed 's/{ exec 9>\(.*\); } 2>\/dev\/null/exec 9>\1 2>\/dev\/null/' "$S/_ledger.sh" > "$OLD32/_ledger.sh"
+  grep -q '^    exec 9>.* 2>/dev/null || return 0' "$OLD32/_ledger.sh"; ck "the old lock line is restored in the copy" 0 $?
+  err="$(p31 Edit file_path "$R31/e.md" | TICKETS_NAG_COOLDOWN=0 bash "$OLD32/require-claim.sh" 2>&1 >/dev/null)"
+  ck "the old lock still blocks" 2 $?
+  [ -z "$err" ] && { pass=$((pass+1)); echo "  ok   and its block has no stderr output (the bug, reproduced)"; } || { fail=$((fail+1)); echo "  FAIL could not reproduce the silent block (got '$err')"; }
+fi
 
 echo
 echo "pass=$pass fail=$fail"

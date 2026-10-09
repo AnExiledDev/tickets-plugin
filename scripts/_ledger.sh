@@ -106,7 +106,10 @@ ledger_lock() {
   mkdir -p "$TICKETS_STATE_DIR" 2>/dev/null || return 0
 
   if command -v flock >/dev/null 2>&1; then
-    exec 9>"$(ledger_path "$1").lock" 2>/dev/null || return 0
+    # The braces scope the 2>/dev/null to opening fd 9. Written on the bare
+    # `exec` it redirected the hook's own stderr for the rest of its run, so
+    # require-claim.sh blocked with exit 2 and "No stderr output".
+    { exec 9>"$(ledger_path "$1").lock"; } 2>/dev/null || return 0
     flock -w "$TICKETS_LOCK_WAIT" 9 2>/dev/null || true
   else
     ledger_dir_lock "$(ledger_path "$1").lockdir"
