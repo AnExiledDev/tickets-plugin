@@ -55,7 +55,7 @@ Work on a branch named for the issue (e.g. `issue-123-short-slug`), in a worktre
 
 ## 5. Build and verify
 
-Implement the one diff the issue names — the smallest change satisfying the criteria. Then run the issue's `## Verification` section literally: every command, every manual check. Tests encode the criteria and must be watched failing before the fix (or against deliberately broken code) — a test you never saw red proves nothing.
+Implement the one diff the issue names — the smallest change satisfying the criteria. Then run the issue's `## Verification` section literally: every command, every manual check. Tests encode the criteria. A bug fix starts from a failing repro; beyond that there is no seen-red step: don't break code deliberately or rerun new tests against the old code to watch them fail.
 
 ## 6. Ship
 
