@@ -49,7 +49,7 @@ Work on a branch named for the issue (e.g. `issue-123-short-slug`), in a worktre
 
 - **`## Human intent` is binding, per line.** A verbatim operator quote outranks the AI-written acceptance criteria around it; on conflict the human line wins and you note the conflict in the PR. Never average the two.
 - **`## Acceptance criteria` is the definition of done.** Each unchecked box is work; each checked claim in your PR must be true.
-- **`## Out of scope` is a wall, not a suggestion.** Adjacent improvements, refactors, and discoveries do NOT ride along. Anything real you find while working: file it via `/tickets:file-issue` and keep moving. A gap in *this* change (missing test, wrong comment) is not a deferral — fix it here.
+- **`## Out of scope` is a wall, not a suggestion.** Adjacent improvements, refactors, and discoveries do NOT ride along. Anything real you find while working: file it via `/tickets:file-issue` and keep moving. A bug related to or caused by this work does not stop at the ticket: it joins your queue and you work it next, on its own branch and PR, unless it is huge or needs human approval, and then the operator answers explicitly (`no-untracked-deferral.md`). A gap in *this* change (missing test, wrong comment) is not a deferral — fix it here.
 - **`## Edge cases` is the minimum test list.** Cover each named case or state in the PR why one doesn't apply.
 - Where the issue is genuinely ambiguous and the codebase doesn't settle it, delegate the call (`delegate-decisions.md`) and post the DECISION line to the issue; don't guess silently and don't stall.
 
