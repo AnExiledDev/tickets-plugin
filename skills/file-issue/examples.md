@@ -42,7 +42,7 @@ Pointers verified as of 2026-08-26; paths and symbols may have moved — verify 
 
 ## Verification
 
-- `bun test src/daemon` — includes the new relaunch test; watch it fail before the fix (Rule 7).
+- `bun test src/daemon` — includes the new relaunch test (Rule 7).
 - Manual: `bun run daemon:dev`, advance a session, `kill -TERM <pid>`, wait for relaunch, confirm the cursor in `~/.botbase/store.json` matches the resumed session.
 - Gate: `bun run check` on the affected package.
 
