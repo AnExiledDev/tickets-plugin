@@ -6,15 +6,48 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/validate-issue.sh"
-          },
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/validate-issue.sh",
+            "if": "Bash(*gh*issue*create*)"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/require-claim.sh"
-          },
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/require-claim.sh",
+            "if": "Bash(*git*commit*)"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/check-claim-adherence.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/check-claim-adherence.sh",
+            "if": "Bash(*gh*pr*create*)"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/check-claim-adherence.sh",
+            "if": "Bash(*git*commit*)"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/check-claim-adherence.sh",
+            "if": "Bash(*git*push*)"
           }
         ]
       },
@@ -34,15 +67,28 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/record-issue-view.sh"
-          },
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/record-issue-view.sh",
+            "if": "Bash(*gh*issue*view*)"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/record-claim.sh"
-          },
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/record-claim.sh",
+            "if": "Bash(*gh*issue*comment*)"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/record-branch-work.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/record-branch-work.sh",
+            "if": "Bash(*git*)"
           }
         ]
       }
